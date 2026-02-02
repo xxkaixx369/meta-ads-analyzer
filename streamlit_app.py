@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
-st.set_page_config(page_title="Meta 廣告關鍵指標診斷", layout="wide")
+st.set_page_config(page_title="Meta 廣告全指標大表", layout="wide")
 
-st.title("🎯 Meta 廣告全路徑關鍵指標看板")
-st.write("此表格集結了行銷漏斗的核心數據，幫助您精確判斷廣告問題點。")
+st.title("📑 Meta 廣告全漏斗數據診斷大表")
+st.write("表格支援橫向捲動，涵蓋了認知(影片留存)、流量(點擊)、轉換(業績)的所有核心指標。")
 
 uploaded_file = st.file_uploader("請上傳 Meta 原始報表 (CSV)", type="csv")
 
@@ -15,97 +14,93 @@ if uploaded_file:
     except:
         df = pd.read_csv(uploaded_file, encoding='big5')
 
-    # --- 1. 精準對應關鍵欄位 ---
+    # --- 1. 自動欄位比對 (精準對應您的報表欄位) ---
     def find_col(keys):
         for col in df.columns:
             clean_col = str(col).replace(" ", "").replace("　", "")
             if any(k in clean_col for k in keys): return col
         return None
 
-    # 定義關鍵指標對照
-    c_map = {
+    c = {
         "camp": find_col(['行銷活動名稱']),
         "adset": find_col(['廣告組合名稱']),
         "ad": find_col(['廣告名稱']),
         "spend": find_col(['花費金額']),
-        "impr": find_col(['曝光次數']),
+        "hook": find_col(['影片播放3秒以上的比率']),
+        "v25": find_col(['影片播放到25%的次數']),
+        "v50": find_col(['影片播放到50%的次_']), # 處理可能的斷字
+        "v75": find_col(['影片播放到75%的次_']),
         "ctr": find_col(['CTR(全部)']),
         "cpc": find_col(['CPC(單次連結點擊成本)']),
-        "hook": find_col(['影片播放3秒以上的比率']),
         "pur": find_col(['購買次數']),
+        "pur_rate": find_col(['購買比率']), # 購買比率 (每次連結點擊)
         "roas": find_col(['購買ROAS']),
-        "atc": find_col(['加到購物車次數'])
+        "val": find_col(['購買轉換值'])
     }
 
-    # --- 2. 數據深度清洗 ---
+    # --- 2. 數據清洗 ---
     def clean_val(val):
         try:
-            if pd.isna(val) or str(val).strip() in ["", "None", "0"]: return 0.0
+            if pd.isna(val) or str(val).strip() in ["", "None"]: return 0.0
             return float(str(val).replace('%', '').replace(',', '').strip())
         except: return 0.0
 
-    numeric_cols = ["spend", "impr", "ctr", "cpc", "hook", "pur", "roas", "atc"]
-    for k in numeric_cols:
-        col_name = c_map[k]
-        if col_name: df[col_name] = df[col_name].apply(clean_val)
+    for k, col_name in c.items():
+        if col_name and k not in ["camp", "adset", "ad"]:
+            df[col_name] = df[col_name].apply(clean_val)
 
-    if c_map["camp"]:
-        # --- 3. 頂部關鍵摘要 (Summary Box) ---
-        total_spend = df[c_map["spend"]].sum() if c_map["spend"] else 0
-        total_pur = df[c_map["pur"]].sum() if c_map["pur"] else 0
-        avg_roas = df[c_map["roas"]].mean() if c_map["roas"] else 0
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("總花費 (TWD)", f"${total_spend:,.0f}")
-        c2.metric("總購買次數", f"{total_pur:,.0f}")
-        c3.metric("平均 ROAS", f"{avg_roas:.2f}")
-        c4.metric("CPA (單次購買成本)", f"${(total_spend/total_pur) if total_pur > 0 else 0:,.0f}")
-
-        # --- 4. 階層式表格顯示 ---
-        st.divider()
-        camps = df[c_map["camp"]].unique()
-        
-        for camp in camps:
-            camp_df = df[df[c_map["camp"]] == camp]
-            with st.expander(f"📌 行銷活動：{camp}"):
+    if c["camp"]:
+        # --- 3. 階層展開 ---
+        for camp in df[c["camp"]].unique():
+            camp_df = df[df[c["camp"]] == camp]
+            with st.expander(f"📌 行銷活動：{camp} (總花費: ${camp_df[c['spend']].sum():,.0f})"):
                 
-                if c_map["adset"]:
-                    for adset in camp_df[c_map["adset"]].unique():
-                        adset_df = camp_df[camp_df[c_map["adset"]] == adset].copy()
+                if c["adset"]:
+                    for adset in camp_df[c["adset"]].unique():
+                        adset_df = camp_df[camp_df[c["adset"]] == adset].copy()
                         st.markdown(f"**📂 廣告組合：{adset}**")
                         
-                        # 計算單次購買成本 (CPA)
-                        def calc_cpa(row):
-                            s = row.get(c_map["spend"], 0)
-                            p = row.get(c_map["pur"], 0)
-                            return s / p if p > 0 else 0
-
-                        adset_df['CPA'] = adset_df.apply(calc_cpa, axis=1)
-
-                        # 選取關鍵指標並重新命名
-                        table_cols = {
-                            c_map["ad"]: "廣告名稱",
-                            c_map["spend"]: "花費",
-                            c_map["hook"]: "吸睛率%",
-                            c_map["ctr"]: "點擊率%",
-                            c_map["cpc"]: "CPC",
-                            c_map["pur"]: "購買",
-                            'CPA': "單次購買成本",
-                            c_map["roas"]: "ROAS"
+                        # --- 4. 建立全指標大表格 ---
+                        # 定義顯示名稱對照
+                        display_map = {
+                            c["ad"]: "廣告名稱",
+                            c["spend"]: "花費",
+                            # 認知指標
+                            c["hook"]: "吸睛率(3s)%",
+                            c["v25"]: "25%觀看",
+                            c["v50"]: "50%觀看",
+                            c["v75"]: "75%觀看",
+                            # 流量指標
+                            c["ctr"]: "CTR%",
+                            c["cpc"]: "CPC",
+                            # 轉換指標
+                            c["pur"]: "購買",
+                            c["pur_rate"]: "購買率%",
+                            c["val"]: "轉換值",
+                            c["roas"]: "ROAS"
                         }
-                        
-                        actual_cols = [c for c in table_cols.keys() if c and (c in adset_df.columns or c == 'CPA')]
-                        display_df = adset_df[actual_cols].rename(columns=table_cols)
-                        
-                        # 格式化
-                        if "吸睛率%" in display_df.columns: display_df["吸睛率%"] = display_df["吸睛率%"].map("{:.1f}%".format)
-                        if "點擊率%" in display_df.columns: display_df["點擊率%"] = display_df["點擊率%"].map("{:.2f}%".format)
-                        if "花費" in display_df.columns: display_df["花費"] = display_df["花費"].map("${:,.0f}".format)
-                        if "單次購買成本" in display_df.columns: display_df["單次購買成本"] = display_df["單次購買成本"].map("${:,.0f}".format)
 
-                        st.dataframe(display_df, use_container_width=True, hide_index=True)
+                        # 只選取報表中有的欄位
+                        valid_cols = [col for col in display_map.keys() if col and col in adset_df.columns]
+                        table_df = adset_df[valid_cols].rename(columns=display_map)
 
+                        # --- 5. 格式化處理 (美化數據) ---
+                        format_dict = {}
+                        if "吸睛率(3s)%" in table_df.columns: format_dict["吸睛率(3s)%"] = "{:.2f}%"
+                        if "CTR%" in table_df.columns: format_dict["CTR%"] = "{:.2f}%"
+                        if "購買率%" in table_df.columns: format_dict["購買率%"] = "{:.2f}%"
+                        if "ROAS" in table_df.columns: format_dict["ROAS"] = "{:.2f}"
+                        if "花費" in table_df.columns: format_dict["花費"] = "${:,.0f}"
+                        if "轉換值" in table_df.columns: format_dict["轉換值"] = "${:,.0f}"
+                        if "CPC" in table_df.columns: format_dict["CPC"] = "${:.2f}"
+                        
+                        # 顯示大表格 (設定高度避免過長)
+                        st.dataframe(
+                            table_df.style.format(format_dict),
+                            use_container_width=True,
+                            hide_index=True
+                        )
     else:
-        st.error("找不到關鍵欄位，請檢查 CSV。")
+        st.error("找不到欄位，請確認 CSV 內容。")
 else:
-    st.info("請上傳 Meta 報表 CSV。")
+    st.info("請上傳 CSV 報表開始分析。")
