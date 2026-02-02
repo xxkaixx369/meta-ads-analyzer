@@ -5,7 +5,7 @@ import google.generativeai as genai
 # 從 Secrets 抓取 API Key
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = model = genai.GenerativeModel('models/gemini-1.5-flash')
 except Exception as e:
     st.error("❌ API Key 設定失敗，請檢查 Streamlit Secrets。")
 
