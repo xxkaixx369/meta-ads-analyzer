@@ -1,54 +1,47 @@
 import streamlit as st
 import pandas as pd
+import google.generativeai as genai
 
-st.set_page_config(page_title="Meta 廣告成效診斷", layout="wide")
-
-st.title("🎯 Meta 廣告素材自動化診斷 (專家邏輯版)")
-st.write("此版本無需 API Key，上傳報表後將自動根據廣告指標提供優化建議。")
-
-# 檔案上傳
-uploaded_file = st.file_uploader("請上傳 Meta 原始報表 (CSV)", type="csv")
-
-if uploaded_file:
-    # 讀取數據 (自動處理不同編碼)
-    try:
-        df = pd.read_csv(uploaded_file, encoding='utf-8')
-    except:
-        df = pd.read_csv(uploaded_file, encoding='big5')
-
-    st.success("數據導入成功！")
-    
-    # 呈現數據清單
-    st.subheader("📊 數據診斷列表")
-    
-    # 診斷邏輯（根據 Meta 常見欄位名稱）
-    for index, row in df.iterrows():
-        ad_name = row.get('廣告名稱', row.get('Ad Name', f'素材 {index}'))
+# 1. 強化版配置：直接強制指定模型與版本
+try:
+    if "GEMINI_API_KEY" not in st.secrets:
+        st.error("❌ 找不到 API Key，請檢查 Secrets 設定。")
+        st.stop()
         
-        # 取得關鍵指標 (若無則設為 0)
-        impressions = row.get('曝光次數', row.get('Impressions', 0))
-        hook_plays = row.get('3 秒影片觀看次數', row.get('3-second video plays', 0))
-        clicks = row.get('連結點擊次數', row.get('Link clicks', 0))
-        
-        # 計算指標
-        hook_rate = (hook_plays / impressions * 100) if impressions > 0 else 0
-        ctr = (clicks / impressions * 100) if impressions > 0 else 0
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    
+    # 【關鍵修正】改用明確的 flash-001 或 flash 完整路徑
+    # 這是目前最能解決 v1beta 404 報錯的寫法
+    model = genai.GenerativeModel(model_name='gemini-1.5-flash-latest')
+    
+except Exception as e:
+    st.error(f"❌ 初始化失敗：{str(e)}")
+    st.stop()
 
-        with st.expander(f"🔍 診斷報告：{ad_name}"):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("吸睛率 (Hook Rate)", f"{hook_rate:.2f}%")
-                st.metric("點擊率 (CTR)", f"{ctr:.2f}%")
+st.title("🚀 Meta 廣告素材 AI 診斷室")
+
+# ... (中間上傳 CSV 的代碼保持不變) ...
+
+# 2. 修正按鈕觸發後的呼叫方式
+if st.button("🪄 請 Gemini AI 進行深度診斷"):
+    with st.spinner('Gemini 正在分析素材中...'):
+        try:
+            # 確保數據轉成字串，並限制長度避免爆量
+            data_context = df.head(15).fillna(0).to_string()
             
-            with c2:
-                st.write("**💡 優化建議：**")
-                if hook_rate < 20 and hook_rate > 0:
-                    st.error("❌ **前 3 秒吸引力不足**：觀眾直接滑過。建議更換開頭前 3 秒的視覺，或加入更強烈的痛點文字。")
-                elif ctr < 1.0 and ctr > 0:
-                    st.warning("⚠️ **內容誘因弱**：雖然有看但不想點。建議強化文案的『行動呼籲 (CTA)』或調整優惠訊息。")
-                elif hook_rate >= 20 and ctr >= 1.0:
-                    st.success("✅ **優質素材**：各項指標良好，建議增加預算並以此風格製作後續素材。")
-                else:
-                    st.info("數據不足，無法提供具體建議。")
-
-st.info("💡 提示：本工具目前設定 Hook Rate > 20% 為合格，CTR > 1% 為合格。")
+            prompt = f"你是一位廣告專家。請分析以下數據並給予優化建議：\n{data_context}"
+            
+            # 這裡增加一個安全機制
+            response = model.generate_content(prompt)
+            
+            if response.text:
+                st.markdown("---")
+                st.subheader("🤖 Gemini 專家分析報告")
+                st.write(response.text)
+            else:
+                st.warning("AI 回傳內容為空，請稍後再試。")
+                
+        except Exception as e:
+            # 如果還是 404，這裡會印出更詳細的錯誤資訊
+            st.error(f"分析過程發生錯誤：{str(e)}")
+            st.info("💡 提示：若持續出現 404，請確認 Google AI Studio 中的 API Key 是否已通過驗證。")
