@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Meta 廣告全指標診斷", layout="wide")
+st.set_page_config(page_title="Meta 全指標漏斗診斷", layout="wide")
 
-st.title("🎯 Meta 廣告全階層指標診斷看板")
-st.write("點擊「行銷活動」展開，即可查看下屬廣告組合與廣告素材的**完整指標表格**。")
+st.title("🎯 Meta 廣告全指標漏斗診斷看板")
+st.write("表格已更新為**全漏斗模式**，包含從曝光到轉換的所有核心數據。")
 
 uploaded_file = st.file_uploader("請上傳 Meta 原始報表 (CSV)", type="csv")
 
@@ -15,108 +15,106 @@ if uploaded_file:
     except:
         df = pd.read_csv(uploaded_file, encoding='big5')
 
-    # --- 1. 強化版欄位偵測 (對準 12.01.33 截圖清單) ---
+    # --- 1. 自動欄位偵測 (對準您的原始清單) ---
     def find_col(keys):
         for col in df.columns:
             clean_col = str(col).replace(" ", "").replace("　", "")
             if any(k in clean_col for k in keys): return col
         return None
 
-    c_camp = find_col(['行銷活動名稱'])
-    c_adset = find_col(['廣告組合名稱'])
-    c_ad = find_col(['廣告名稱'])
-    c_spend = find_col(['花費金額'])
-    c_impr = find_col(['曝光次數'])
-    c_ctr = find_col(['CTR(全部)'])
-    c_hook = find_col(['影片播放3秒以上的比率'])
-    c_roas = find_col(['購買ROAS'])
+    # 定義所有您需要的指標
+    cols_map = {
+        "camp": find_col(['行銷活動名稱']),
+        "adset": find_col(['廣告組合名稱']),
+        "ad": find_col(['廣告名稱']),
+        "spend": find_col(['花費金額']),
+        "impr": find_col(['曝光次數']),
+        "cpc": find_col(['CPC(單次連結點擊成本)']),
+        "ctr": find_col(['CTR(全部)']),
+        "atc": find_col(['加到購物車次數']),
+        "init_check": find_col(['開始結帳次數']),
+        "pur": find_col(['購買次數']),
+        "roas": find_col(['購買ROAS']),
+        "hook": find_col(['影片播放3秒以上的比率']),
+        "thru": find_col(['ThruPlay次數'])
+    }
 
-    # --- 2. 深度資料清洗 (解決 0 或 None 的問題) ---
+    # --- 2. 數據清洗 ---
     def clean_val(val):
         try:
             if pd.isna(val) or str(val).strip() in ["", "None", "0"]: return 0.0
             return float(str(val).replace('%', '').replace(',', '').strip())
         except: return 0.0
 
-    if c_camp:
-        for col in [c_spend, c_ctr, c_hook, c_roas]:
-            if col: df[col] = df[col].apply(clean_val)
+    # 排除名稱類欄位，將指標類全部轉為數字
+    numeric_keys = ["spend", "impr", "cpc", "ctr", "atc", "init_check", "pur", "roas", "hook", "thru"]
+    for k in numeric_keys:
+        col_name = cols_map[k]
+        if col_name: df[col_name] = df[col_name].apply(clean_val)
 
-        # --- 3. 核心診斷邏輯 (更靈敏的判讀標準) ---
-        def get_ai_advice(row):
-            h = row.get(c_hook, 0)
-            c = row.get(c_ctr, 0)
-            r = row.get(c_roas, 0)
-            s = row.get(c_spend, 0)
+    if cols_map["camp"]:
+        # --- 3. 診斷建議邏輯 (多維度判斷) ---
+        def get_detailed_advice(row):
+            s = row.get(cols_map["spend"], 0)
+            h = row.get(cols_map["hook"], 0)
+            c = row.get(cols_map["ctr"], 0)
+            p = row.get(cols_map["pur"], 0)
+            r = row.get(cols_map["roas"], 0)
             
-            if s == 0: return "⚪️ 尚無數據"
-            if h < 25: return "❌ 吸睛度低 (前3秒流失)"
-            if c < 0.9: return "⚠️ 連結誘因不足 (點擊弱)"
-            if r > 0 and r < 1.2: return "💸 投報率偏低 (轉換差)"
-            if r >= 2.5 or (c > 1.5 and h > 35): return "🔥 表現優異：建議加預算"
+            if s == 0: return "⚪️ 暫無消耗"
+            if r >= 3.0: return "🔥 獲利強勁：立即加碼"
+            if p > 0 and r < 1.5: return "💸 有訂單但虧損：需降成本"
+            if p == 0 and s > 500: return "❌ 轉換斷層：檢查落地頁"
+            if c < 0.8: return "⚠️ 連結太冷：建議改圖文"
+            if h < 20: return "🪝 鉤子不響：改影片前3秒"
             return "✅ 表現穩定"
 
-        # --- 4. 數據摘要看板 ---
-        st.subheader("📊 帳戶整體成效")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("總消耗 (TWD)", f"${df[c_spend].sum():,.0f}" if c_spend else "N/A")
-        m2.metric("平均 CTR", f"{df[c_ctr].mean():.2f}%" if c_ctr else "N/A")
-        m3.metric("平均吸睛率 (Hook)", f"{df[c_hook].mean():.2f}%" if c_hook else "N/A")
-
-        # --- 5. 階層式顯示 (含完整指標表格) ---
-        st.divider()
-        st.subheader("📋 階層式指標清單")
-        
-        camps = df[c_camp].unique()
+        # --- 4. 階層式顯示 ---
+        camps = df[cols_map["camp"]].unique()
         for camp in camps:
-            camp_df = df[df[c_camp] == camp]
-            camp_spend = camp_df[c_spend].sum()
+            camp_df = df[df[cols_map["camp"]] == camp]
+            camp_spend = camp_df[cols_map["spend"]].sum()
             
             with st.expander(f"📌 行銷活動：{camp} | 總花費: ${camp_spend:,.0f}"):
-                
-                if c_adset in df.columns:
-                    adsets = camp_df[c_adset].unique()
+                if cols_map["adset"]:
+                    adsets = camp_df[cols_map["adset"]].unique()
                     for adset in adsets:
-                        adset_df = camp_df[camp_df[c_adset] == adset]
+                        adset_df = camp_df[camp_df[cols_map["adset"]] == adset]
                         st.markdown(f"**📂 廣告組合：{adset}**")
                         
-                        # 整理要顯示的廣告表格資料
-                        table_df = adset_df.copy()
-                        table_df['AI 診斷建議'] = table_df.apply(get_ai_advice, axis=1)
+                        # 整理最終顯示表格
+                        final_df = adset_df.copy()
+                        final_df['AI 診斷建議'] = final_df.apply(get_detailed_advice, axis=1)
                         
-                        # 格式化顯示
-                        display_cols = {
-                            c_ad: "廣告素材名稱",
-                            c_spend: "花費 (TWD)",
-                            c_hook: "吸睛率(%)",
-                            c_ctr: "點擊率(%)",
-                            c_roas: "ROAS",
+                        # 設定表格欄位名稱對照表 (User Friendly)
+                        display_rename = {
+                            cols_map["ad"]: "廣告名稱",
+                            cols_map["spend"]: "花費",
+                            cols_map["hook"]: "吸睛率%",
+                            cols_map["ctr"]: "CTR%",
+                            cols_map["cpc"]: "CPC",
+                            cols_map["atc"]: "購物車",
+                            cols_map["pur"]: "購買",
+                            cols_map["roas"]: "ROAS",
                             'AI 診斷建議': "AI 診斷建議"
                         }
                         
-                        # 只選取存在的欄位並重新命名
-                        actual_cols = [c for c in display_cols.keys() if c in table_df.columns]
-                        final_table = table_df[actual_cols].rename(columns=display_cols)
+                        # 過濾並重新命名
+                        cols_to_use = [c for c in display_rename.keys() if c and c in final_df.columns]
+                        table_to_show = final_df[cols_to_use].rename(columns=display_rename)
                         
-                        # 顯示表格 (使用 dataframe 讓介面更整齊)
-                        st.dataframe(
-                            final_table.sort_values("花費 (TWD)", ascending=False),
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                else:
-                    st.warning("報表中缺少『廣告組合名稱』，請在匯出時確認維度。")
+                        # 數據格式美化 (加上 %, $)
+                        if "吸睛率%" in table_to_show.columns:
+                            table_to_show["吸睛率%"] = table_to_show["吸睛率%"].map("{:.1f}%".format)
+                        if "CTR%" in table_to_show.columns:
+                            table_to_show["CTR%"] = table_to_show["CTR%"].map("{:.2f}%".format)
+                        if "ROAS" in table_to_show.columns:
+                            table_to_show["ROAS"] = table_to_show["ROAS"].map("{:.2f}".format)
 
-        # --- 6. 視覺化分析 ---
-        if c_spend and c_ctr:
-            st.divider()
-            st.subheader("📈 素材效率分佈 (氣泡圖)")
-            fig = px.scatter(df, x=c_spend, y=c_ctr, color=c_camp, 
-                             size=c_impr if c_impr else None,
-                             hover_data=[c_ad], text=c_ad,
-                             title="X軸:花費金額 / Y軸:點擊率 (越高代表素材越強)")
-            st.plotly_chart(fig, use_container_width=True)
+                        st.dataframe(table_to_show, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("請在 Meta 匯出報表時包含『廣告組合』與『廣告名稱』。")
     else:
-        st.error("❌ 找不到關鍵欄位，請確認 CSV 標題包含『行銷活動名稱』。")
+        st.error("無法辨識『行銷活動名稱』，請確認 CSV 檔案。")
 else:
-    st.info("👋 請上傳包含『行銷活動、廣告組合、廣告』三層級的 Meta CSV 報表。")
+    st.info("👋 請上傳 CSV 報表。建議匯出包含：行銷活動、廣告組合、廣告、購買、ATC 等指標。")
