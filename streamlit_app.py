@@ -10,7 +10,7 @@ try:
         
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     # 這裡建議使用最新的 flash 模型名稱
-    model = genai.GenerativeModel('gemini-1.5-flash') 
+    model = genai.GenerativeModel('models/gemini-1.5-flash')
 except Exception as e:
     st.error(f"❌ 初始化失敗：{str(e)}")
     st.stop()
