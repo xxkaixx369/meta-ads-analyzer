@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Meta 廣告數據診斷", layout="wide")
+# --- 設定頁面 ---
+st.set_page_config(page_title="Meta 廣告全指標診斷", layout="wide")
 st.title("🎯 Meta 廣告全漏斗關鍵指標大表")
 
-uploaded_file = st.file_uploader("請上傳 Meta 原始報表 (CSV)", type="csv")
+uploaded_file = st.file_uploader("請上傳包含『影片指標』的 Meta 報表 (CSV)", type="csv")
 
 if uploaded_file:
     try:
@@ -12,7 +13,7 @@ if uploaded_file:
     except:
         df = pd.read_csv(uploaded_file, encoding='big5')
 
-    # --- 1. 精準對齊欄位 ---
+    # --- 欄位自動匹配函數 ---
     def find_col(keys):
         for col in df.columns:
             clean_col = str(col).strip()
@@ -20,84 +21,56 @@ if uploaded_file:
                 return col
         return None
 
-    # 定義指標對照 (特別加強鉤子率的對應)
+    # 關鍵欄位對應
     c = {
         "camp": find_col(['行銷活動名稱']),
-        "adset": find_col(['廣告組合名稱']),
         "ad": find_col(['廣告名稱']),
         "spend": find_col(['花費金額']),
-        # 鉤子率直接對應 3秒播放比率
-        "hook": find_col(['影片播放 3 秒以上的比率', '影片播放3秒以上的比率']), 
+        "hook": find_col(['影片播放 3 秒以上的比率', '影片播放3秒']), # 鉤子率
         "v25": find_col(['影片播放到 25%']),
-        "v50": find_col(['影片播放到 50%']),
-        "v75": find_col(['影片播放到 75%']),
-        "ctr": find_col(['CTR (全部)', 'CTR（連結點閱率）']),
-        "cpc": find_col(['CPC (單次連結點擊成本)', 'CPC（單次連結點擊成本）']),
+        "ctr": find_col(['CTR（連結點閱率）', 'CTR']),
         "pur": find_col(['購買次數', '成果']),
-        "pur_rate": find_col(['購買比率']),
-        "val": find_col(['購買轉換值']),
         "roas": find_col(['購買 ROAS', '購買ROAS'])
     }
 
-    # --- 2. 數據清洗 ---
-    def clean_num(val):
+    # 檢查是否缺少關鍵指標
+    missing_cols = [k for k, v in c.items() if v is None and k in ['hook', 'v25', 'roas']]
+    if missing_cols:
+        st.warning(f"⚠️ 偵測到報表缺少以下指標，請重新導出：{', '.join(missing_cols)}")
+
+    # --- 數據清洗 ---
+    def clean_val(val):
         try:
-            if pd.isna(val) or str(val).strip() in ["", "None", "nan"]: return 0.0
+            if pd.isna(val) or str(val).strip() in ["", "None"]: return 0.0
             return float(str(val).replace('%', '').replace(',', '').strip())
         except: return 0.0
 
-    numeric_keys = ["spend", "hook", "v25", "v50", "v75", "ctr", "cpc", "pur", "pur_rate", "val", "roas"]
-    for k in numeric_keys:
-        if c[k]: df[c[k]] = df[c[k]].apply(clean_num)
+    for k, col_name in c.items():
+        if col_name and k not in ['camp', 'ad']:
+            df[col_name] = df[col_name].apply(clean_val)
 
+    # --- 表格顯示 ---
     if c["camp"]:
-        for camp in df[c["camp"]].unique():
-            camp_df = df[df[c["camp"]] == camp]
-            with st.expander(f"📌 行銷活動：{camp} (總花費: ${camp_df[c['spend']].sum():,.0f})"):
-                
-                if c["adset"]:
-                    for adset in camp_df[c["adset"]].unique():
-                        adset_df = camp_df[camp_df[c["adset"]] == adset].copy()
-                        st.markdown(f"**📂 廣告組合：{adset}**")
+        # 建立顯示用的 DataFrame
+        table_df = df.copy()
+        
+        # 重新命名以便閱讀
+        display_map = {
+            c["ad"]: "廣告名稱",
+            c["spend"]: "花費",
+            c["hook"]: "鉤子率(3s)%",
+            c["v25"]: "影片25%",
+            c["ctr"]: "CTR%",
+            c["pur"]: "購買數",
+            c["roas"]: "ROAS"
+        }
+        
+        show_cols = [v for v in display_map.values() if v is not None]
+        final_df = table_df.rename(columns={v: k for k, v in display_map.items() if v})[show_cols]
 
-                        # 建立顯示大表格
-                        display_map = {
-                            c["ad"]: "廣告名稱",
-                            c["spend"]: "花費",
-                            c["hook"]: "鉤子率(3s)%",
-                            c["v25"]: "影片25%",
-                            c["v50"]: "影片50%",
-                            c["v75"]: "影片75%",
-                            c["ctr"]: "CTR%",
-                            c["cpc"]: "CPC",
-                            c["pur"]: "購買數",
-                            c["pur_rate"]: "購買率%",
-                            c["val"]: "轉換值",
-                            c["roas"]: "ROAS"
-                        }
-                        
-                        valid_cols = [col for col in display_map.keys() if col and col in adset_df.columns]
-                        table_df = adset_df[valid_cols].rename(columns=display_map)
+        # 格式化顯示
+        fmt = {"花費": "${:,.0f}", "鉤子率(3s)%": "{:.2f}%", "CTR%": "{:.2f}%", "ROAS": "{:.2f}"}
+        st.dataframe(final_df.style.format(fmt, na_rep='-'), use_container_width=True)
 
-                        # --- 3. 診斷邏輯 ---
-                        def get_diagnosis(row):
-                            h = row.get("鉤子率(3s)%", 0)
-                            r = row.get("ROAS", 0)
-                            if r >= 2.5: return "🔥 獲利強勁"
-                            if h < 20 and h > 0: return "🪝 鉤子太弱 (改開頭)"
-                            if h >= 35: return "✅ 抓眼力強"
-                            return "✅ 表現穩定"
-
-                        table_df['AI 診斷'] = table_df.apply(get_diagnosis, axis=1)
-
-                        # 格式化
-                        fmt = {
-                            "花費": "${:,.0f}", "鉤子率(3s)%": "{:.1f}%", "CTR%": "{:.2f}%",
-                            "購買率%": "{:.2f}%", "ROAS": "{:.2f}", "轉換值": "${:,.0f}", "CPC": "${:.2f}"
-                        }
-                        
-                        st.dataframe(table_df.style.format(fmt), use_container_width=True, hide_index=True)
-    else:
-        st.error("欄位匹配失敗，請確認 CSV 標題。")
 else:
-    st.info("請上傳 CSV 報表開始分析。")
+    st.info("💡 您的目前報表欄位僅有：觸及、曝光、點擊、花費。請重新從 Meta 匯出包含『影片比率』與『ROAS』的報表。")
