@@ -18,8 +18,7 @@ if uploaded_file:
 
     st.success("數據導入成功！")
 
-    # --- 2. 核心指標計算 (自動偵測欄位) ---
-    # 這裡會嘗試抓取 Meta 常見的中英文欄位名稱
+    # --- 2. 核心指標計算 ---
     col_map = {
         'impressions': next((c for c in df.columns if c.lower() in ['impressions', '曝光次數']), None),
         'clicks': next((c for c in df.columns if c.lower() in ['link clicks', '連結點擊次數']), None),
@@ -28,7 +27,6 @@ if uploaded_file:
         'ad_name': next((c for c in df.columns if 'ad name' in c.lower() or '廣告名稱' in c), None)
     }
 
-    # 計算 Hook Rate (吸睛率) 與 CTR (點擊率)
     if col_map['impressions']:
         if col_map['hook_plays']:
             df['Hook Rate (%)'] = (df[col_map['hook_plays']] / df[col_map['impressions']] * 100).round(2)
@@ -54,7 +52,6 @@ if uploaded_file:
         with st.expander(f"🔍 檢查素材：{name}"):
             c1, c2, c3 = st.columns(3)
             
-            # 顯示數據
             h_rate = row.get('Hook Rate (%)', 0)
             ctr_rate = row.get('CTR (%)', 0)
             
@@ -63,9 +60,14 @@ if uploaded_file:
             
             with c3:
                 st.write("**💡 優化方向：**")
-                # 診斷邏輯
+                # 這裡就是修正縮排的地方
                 if h_rate < 25 and h_rate > 0:
-                    st.error("❌ 開頭太無聊：觀眾滑過率高。建議更換前3秒畫面，直接講痛點。")
+                    st.error("❌ 開頭太無聊：觀眾滑過率高。建議更換前3秒畫面。")
                 elif ctr_rate < 1.0 and ctr_rate > 0:
-                    st.warning("⚠️ 內容沒誘因：大家看了但不想點。建議強化文案的優惠資訊或CTA。")
+                    st.warning("⚠️ 內容沒誘因：大家看了但不想點。建議強化文案。")
                 elif h_rate >= 25 and ctr_rate >= 1.0:
+                    st.success("✅ 黃金素材：表現優異！建議增加預算。")
+                else:
+                    st.info("數據分析中或欄位不足。")
+
+st.sidebar.info("### 診斷標準\n1. Hook Rate > 25%: 合格\n2. CTR > 1.0%: 合格")
