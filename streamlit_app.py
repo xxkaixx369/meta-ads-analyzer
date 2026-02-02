@@ -1,57 +1,71 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
+import plotly.express as px
 
-# 1. 增強版 API 配置
-try:
-    if "GEMINI_API_KEY" not in st.secrets:
-        st.error("❌ 找不到 Secrets！請確認 Streamlit Cloud 已填入 GEMINI_API_KEY。")
-        st.stop()
-        
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    # 這裡建議使用最新的 flash 模型名稱
-    model = genai.GenerativeModel('gemini-1.5-flash') 
-except Exception as e:
-    st.error(f"❌ 初始化失敗：{str(e)}")
-    st.stop()
+st.set_page_config(page_title="Meta 廣告診斷工具", layout="wide")
 
-st.title("🚀 Meta 廣告素材 AI 診斷室")
+st.title("🎯 Meta 廣告素材自動化診斷")
+st.write("本工具會自動計算 Hook Rate 與 CTR，並提供優化建議。")
 
-uploaded_file = st.file_uploader("上傳 Meta 原始報表 (CSV)", type="csv")
+# 1. 檔案上傳
+uploaded_file = st.file_uploader("請上傳 Meta 原始報表 (CSV)", type="csv")
 
 if uploaded_file:
-    # 增加編碼相容性，Meta CSV 有時是 utf-8 或 big5
     try:
         df = pd.read_csv(uploaded_file, encoding='utf-8')
     except:
         df = pd.read_csv(uploaded_file, encoding='big5')
-        
+
     st.success("數據導入成功！")
-    st.dataframe(df.head(5)) # 多秀幾行數據確認欄位
+
+    # --- 2. 核心指標計算 (自動偵測欄位) ---
+    # 這裡會嘗試抓取 Meta 常見的中英文欄位名稱
+    col_map = {
+        'impressions': next((c for c in df.columns if c.lower() in ['impressions', '曝光次數']), None),
+        'clicks': next((c for c in df.columns if c.lower() in ['link clicks', '連結點擊次數']), None),
+        'hook_plays': next((c for c in df.columns if '3-second video plays' in c.lower() or '3 秒影片觀看次數' in c), None),
+        'spend': next((c for c in df.columns if 'amount spent' in c.lower() or '金額' in c or '花費' in c), None),
+        'ad_name': next((c for c in df.columns if 'ad name' in c.lower() or '廣告名稱' in c), None)
+    }
+
+    # 計算 Hook Rate (吸睛率) 與 CTR (點擊率)
+    if col_map['impressions']:
+        if col_map['hook_plays']:
+            df['Hook Rate (%)'] = (df[col_map['hook_plays']] / df[col_map['impressions']] * 100).round(2)
+        if col_map['clicks']:
+            df['CTR (%)'] = (df[col_map['clicks']] / df[col_map['impressions']] * 100).round(2)
+
+    # --- 3. 視覺化分析圖表 ---
+    st.subheader("📊 素材成效分佈圖")
+    if col_map['spend'] and 'CTR (%)' in df.columns:
+        fig = px.scatter(df, x=col_map['spend'], y='CTR (%)', text=col_map['ad_name'],
+                         size=col_map['spend'], color='CTR (%)',
+                         color_continuous_scale='RdYlGn',
+                         title="成效分佈：越往左上方代表『低成本、高點擊』的優質素材",
+                         labels={col_map['spend']: "消耗金額", 'CTR (%)': "點擊率 (CTR %)"})
+        st.plotly_chart(fig, use_container_width=True)
     
-    goal = st.selectbox("您的優化目標", ["網站流量", "影片觀看", "購買轉換"])
+    # --- 4. 自動化診斷報告 ---
+    st.divider()
+    st.subheader("📋 單一素材深度診斷")
     
-    if st.button("🪄 請 Gemini AI 進行深度診斷"):
-        with st.spinner('Gemini 正在分析素材中...'):
-            try:
-                # 建議加上清理空值的步驟，避免給 AI 亂碼
-                data_context = df.head(10).fillna(0).to_string()
-                
-                prompt = f"""
-                你是一位專業的 Meta 廣告分析師。
-                目標：{goal}
-                數據內容：
-                {data_context}
-                
-                請分析：
-                1. 找出表現最好與最差素材。
-                2. 具體的視覺與文案建議。
-                3. 以繁體中文專業回覆。
-                """
-                
-                response = model.generate_content(prompt)
-                st.markdown("---")
-                st.subheader("🤖 Gemini 專家分析報告")
-                st.write(response.text)
-            except Exception as e:
-                st.error(f"分析過程發生錯誤：{str(e)}")
+    for index, row in df.iterrows():
+        name = row.get(col_map['ad_name'], f"素材 {index}")
+        with st.expander(f"🔍 檢查素材：{name}"):
+            c1, c2, c3 = st.columns(3)
+            
+            # 顯示數據
+            h_rate = row.get('Hook Rate (%)', 0)
+            ctr_rate = row.get('CTR (%)', 0)
+            
+            c1.metric("吸睛率 (Hook Rate)", f"{h_rate}%")
+            c2.metric("點擊率 (CTR)", f"{ctr_rate}%")
+            
+            with c3:
+                st.write("**💡 優化方向：**")
+                # 診斷邏輯
+                if h_rate < 25 and h_rate > 0:
+                    st.error("❌ 開頭太無聊：觀眾滑過率高。建議更換前3秒畫面，直接講痛點。")
+                elif ctr_rate < 1.0 and ctr_rate > 0:
+                    st.warning("⚠️ 內容沒誘因：大家看了但不想點。建議強化文案的優惠資訊或CTA。")
+                elif h_rate >= 25 and ctr_rate >= 1.0:
